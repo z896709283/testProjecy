@@ -519,13 +519,16 @@ public class ExtensionLoader<T> {
 
     @SuppressWarnings("unchecked")
     private T createExtension(String name) {
+        //先加载Class对象，先从缓存找，找不到读dubbo spi的那几个文件
         Class<?> clazz = getExtensionClasses().get(name);
         if (clazz == null) {
             throw findException(name);
         }
         try {
+            //先从缓存读实例
             T instance = (T) EXTENSION_INSTANCES.get(clazz);
             if (instance == null) {
+                //没有的话，反射出一个，放在缓存
                 EXTENSION_INSTANCES.putIfAbsent(clazz, clazz.newInstance());
                 instance = (T) EXTENSION_INSTANCES.get(clazz);
             }
@@ -546,22 +549,32 @@ public class ExtensionLoader<T> {
     private T injectExtension(T instance) {
         try {
             if (objectFactory != null) {
+                //遍历方法
                 for (Method method : instance.getClass().getMethods()) {
+                    //若是set方法
                     if (isSetter(method)) {
                         /**
                          * Check {@link DisableInject} to see if we need auto injection for this property
                          */
+                        //如果使用了DisableInject注解，不注入，直接跳过
                         if (method.getAnnotation(DisableInject.class) != null) {
                             continue;
                         }
                         Class<?> pt = method.getParameterTypes()[0];
+//                        如果方法第一个入参是基本数据类型及其对应的数组，不注入
                         if (ReflectUtils.isPrimitives(pt)) {
                             continue;
                         }
                         try {
+                            //getSetterProperty，就是找到set的属性名字 比如 setAbcd -> abcd
                             String property = getSetterProperty(method);
+                            //通过objectFactory获取实例，objectFactory有以下几个实例
+                            // 1.这个地方发现可以集成spring，直接context.getBean(String beanName)得到依赖对象
+                            //2.还有SpiExtensionFactory,就是调用ExtensionLoader.getExtension
+                            //3.还有个AdaptiveFactory
                             Object object = objectFactory.getExtension(pt, property);
                             if (object != null) {
+                                //set注入
                                 method.invoke(instance, object);
                             }
                         } catch (Exception e) {
@@ -612,11 +625,13 @@ public class ExtensionLoader<T> {
     }
 
     private Map<String, Class<?>> getExtensionClasses() {
+        //读缓存
         Map<String, Class<?>> classes = cachedClasses.get();
         if (classes == null) {
             synchronized (cachedClasses) {
                 classes = cachedClasses.get();
                 if (classes == null) {
+                    //缓存没有，都文件
                     classes = loadExtensionClasses();
                     cachedClasses.set(classes);
                 }
@@ -627,8 +642,10 @@ public class ExtensionLoader<T> {
 
     // synchronized in getExtensionClasses
     private Map<String, Class<?>> loadExtensionClasses() {
+        //先缓存默认实现的扩展点的class
         cacheDefaultExtensionName();
 
+        //开io流，读dubbo spi的那几个文件，缓存Class对象
         Map<String, Class<?>> extensionClasses = new HashMap<>();
         loadDirectory(extensionClasses, DUBBO_INTERNAL_DIRECTORY, type.getName());
         loadDirectory(extensionClasses, DUBBO_INTERNAL_DIRECTORY, type.getName().replace("org.apache", "com.alibaba"));
