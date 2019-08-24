@@ -83,6 +83,7 @@ public class AdaptiveClassCodeGenerator {
 
     /**
      * generate and return class code
+     * 动态生成java代码
      */
     public String generate() {
         // no need to generate adaptive class since there's no adaptive method found.
@@ -91,11 +92,15 @@ public class AdaptiveClassCodeGenerator {
         }
 
         StringBuilder code = new StringBuilder();
+        //生成包信息
         code.append(generatePackageInfo());
+        //import信息
         code.append(generateImports());
+        //class声明
         code.append(generateClassDeclaration());
 
         Method[] methods = type.getMethods();
+        //遍历method，生成method代码
         for (Method method : methods) {
             code.append(generateMethod(method));
         }
@@ -154,8 +159,12 @@ public class AdaptiveClassCodeGenerator {
      * generate method declaration
      */
     private String generateMethod(Method method) {
+        //返回值
         String methodReturnType = method.getReturnType().getCanonicalName();
+        //方法名
         String methodName = method.getName();
+
+        //方法体
         String methodContent = generateMethodContent(method);
         String methodArgs = generateMethodArguments(method);
         String methodThrows = generateMethodThrows(method);
@@ -198,14 +207,17 @@ public class AdaptiveClassCodeGenerator {
     private String generateMethodContent(Method method) {
         Adaptive adaptiveAnnotation = method.getAnnotation(Adaptive.class);
         StringBuilder code = new StringBuilder(512);
+        //没有被Adaptive注解，生成抛出异常的代码
         if (adaptiveAnnotation == null) {
             return generateUnsupported(method);
         } else {
+            //找到Url参数的位置角标
             int urlTypeIndex = getUrlTypeIndex(method);
 
             // found parameter in URL type
             if (urlTypeIndex != -1) {
                 // Null Point check
+                //没有Url参数，生成抛出异常的代码
                 code.append(generateUrlNullCheck(urlTypeIndex));
             } else {
                 // did not find parameter in URL type
