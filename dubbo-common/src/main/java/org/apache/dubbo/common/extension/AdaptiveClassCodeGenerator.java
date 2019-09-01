@@ -67,6 +67,7 @@ public class AdaptiveClassCodeGenerator {
 
     private final Class<?> type;
 
+    //@SPI的值
     private String defaultExtName;
 
     public AdaptiveClassCodeGenerator(Class<?> type, String defaultExtName) {
@@ -164,7 +165,7 @@ public class AdaptiveClassCodeGenerator {
         //方法名
         String methodName = method.getName();
 
-        //方法体
+        //方法体 简言之 Url 的参数值 > @SPI 的默认值 > @Adaptive的default.key
         String methodContent = generateMethodContent(method);
         String methodArgs = generateMethodArguments(method);
         String methodThrows = generateMethodThrows(method);
@@ -221,19 +222,30 @@ public class AdaptiveClassCodeGenerator {
                 code.append(generateUrlNullCheck(urlTypeIndex));
             } else {
                 // did not find parameter in URL type
+                //自动生成取出Url入参并且赋值的代码,取不到就抛出异常
+                //Url url = arg[i].getXxxx();没有的话会抛出异常
                 code.append(generateUrlAssignmentIndirectly(method));
             }
 
+            //取得@Adaptive注解的value值,放在value数组，这个是key值，用于从Url获取value作为extName，没有填写，产生默认值，产生默认值的规则为 AaaaBbbbDddd -> aaaa.bbbb.dddd
+            //url.getParameter(String key) 如果取不到value，用default.key做默认值
             String[] value = getMethodAdaptiveValue(adaptiveAnnotation);
 
+            //org.apache.dubbo.rpc.Invocation 方法的参数里面有没有这个类型的
             boolean hasInvocation = hasInvocationArgument(method);
 
+            ////org.apache.dubbo.rpc.Invocation  这个入参不能为null,否则抛出异常
+            /*"if (arg%d == null) throw new IllegalArgumentException(\"invocation == null\"); "
+                    + "String methodName = arg%d.getMethodName();\n";*/
             code.append(generateInvocationArgumentNullCheck(method));
 
+            //初始化extName
+            //url 的value值>@SPI()的默认值>@Adaptive(key)的default.key值
             code.append(generateExtNameAssignment(value, hasInvocation));
-            // check extName == null?
+            // check extName == null? 抛出异常
             code.append(generateExtNameNullCheck(value));
 
+            //%s extension = (%<s)%s.getExtensionLoader(%s.class).getExtension(extName);\n";
             code.append(generateExtensionAssignment());
 
             // return statement
@@ -256,11 +268,13 @@ public class AdaptiveClassCodeGenerator {
     private String generateExtNameAssignment(String[] value, boolean hasInvocation) {
         // TODO: refactor it
         String getNameCode = null;
+        //倒叙遍历，根据@Adaptive的key值不通或取代吗，如果故事@Adaptive("protocol"),则会生成url.getProtocol();
         for (int i = value.length - 1; i >= 0; --i) {
+            //如果是数组最后一个元素，也就是第一个遍历的元素
             if (i == value.length - 1) {
-                if (null != defaultExtName) {
+                if (null != defaultExtName) { //@SPI的默认值不为空的情况
                     if (!"protocol".equals(value[i])) {
-                        if (hasInvocation) {
+                        if (hasInvocation) { //方法参数含有Invocation类型
                             getNameCode = String.format("url.getMethodParameter(methodName, \"%s\", \"%s\")", value[i], defaultExtName);
                         } else {
                             getNameCode = String.format("url.getParameter(\"%s\", \"%s\")", value[i], defaultExtName);
@@ -337,8 +351,10 @@ public class AdaptiveClassCodeGenerator {
      * get value of adaptive annotation or if empty return splitted simple name
      */
     private String[] getMethodAdaptiveValue(Adaptive adaptiveAnnotation) {
+        //取得@Adaptive注解的value
         String[] value = adaptiveAnnotation.value();
         // value is not set, use the value generated from class name as the key
+        //没有默认值，value会根据类名生成，如YyyyMmDd -》 yyyy.mm.dd
         if (value.length == 0) {
             String splitName = StringUtils.camelToSplitName(type.getSimpleName(), ".");
             value = new String[]{splitName};
@@ -357,6 +373,7 @@ public class AdaptiveClassCodeGenerator {
         Class<?>[] pts = method.getParameterTypes();
 
         // find URL getter method
+        //遍历方法每个入参的方法，找到public Url getXxxx();
         for (int i = 0; i < pts.length; ++i) {
             for (Method m : pts[i].getMethods()) {
                 String name = m.getName();
@@ -365,6 +382,7 @@ public class AdaptiveClassCodeGenerator {
                         && !Modifier.isStatic(m.getModifiers())
                         && m.getParameterTypes().length == 0
                         && m.getReturnType() == URL.class) {
+                    //自动将Url取出 Url url = arg[i].getXxxx();没有的话会抛出异常
                     return generateGetUrlNullCheck(i, pts[i], name);
                 }
             }
@@ -384,11 +402,14 @@ public class AdaptiveClassCodeGenerator {
     private String generateGetUrlNullCheck(int index, Class<?> type, String method) {
         // Null point check
         StringBuilder code = new StringBuilder();
+        //这个参数不能为空
         code.append(String.format("if (arg%d == null) throw new IllegalArgumentException(\"%s argument == null\");\n",
                 index, type.getName()));
+        //这个参数的public Url getXxxx();返回的结果不能为null
         code.append(String.format("if (arg%d.%s() == null) throw new IllegalArgumentException(\"%s argument %s() == null\");\n",
                 index, method, type.getName(), method));
 
+        //Url url = 参数i.getXxxx();没有的话会抛出异常
         code.append(String.format("%s url = arg%d.%s();\n", URL.class.getName(), index, method));
         return code.toString();
     }
